@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Trello Data Extractor - Simple</title>
+    <script src="https://p.trellocdn.com/power-up.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f4f5f7;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .button {
+            background: #0079bf;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin: 10px 5px;
+            display: inline-block;
+            text-decoration: none;
+        }
+        .button:hover { background: #005a8b; }
+        .status {
+            margin: 15px 0;
+            padding: 10px;
+            border-radius: 4px;
+            display: none;
+        }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+        .info { background: #d1ecf1; color: #0c5460; }
+        .data-output {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 15px 0;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            display: none;
+        }
+        .input-group {
+            margin: 15px 0;
+        }
+        .input-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        .input-group input, .input-group select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        .checkbox-group {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin: 10px 0;
+        }
+        .checkbox-item {
+            display: flex;
+            align-items: center;
+        }
+        .checkbox-item input { width: auto; margin-right: 8px; }
+        h2 { color: #172b4d; margin-top: 0; }
+        h3 { color: #5e6c84; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>📊 Extrator de Dados Trello</h2>
+        <p>Extraia dados de quadros públicos do Trello em formato JSON</p>
+        
+        <div class="input-group">
+            <label for="board-url">URL do Quadro Público:</label>
+            <input type="text" id="board-url" placeholder="https://trello.com/b/xxxxxxxx/nome-do-quadro" />
+        </div>
+        
+        <div class="input-group">
+            <label>Dados para Extrair:</label>
+            <div class="checkbox-group">
+                <div class="checkbox-item">
+                    <input type="checkbox" id="extract-board" checked>
+                    <label for="extract-board">Informações do Quadro</label>
+                </div>
+                <div class="checkbox-item">
+                    <input type="checkbox" id="extract-lists" checked>
+                    <label for="extract-lists">Listas</label>
+                </div>
+                <div class="checkbox-item">
+                    <input type="checkbox" id="extract-cards" checked>
+                    <label for="extract-cards">Cartões</label>
+                </div>
+                <div class="checkbox-item">
+                    <input type="checkbox" id="extract-members" checked>
+                    <label for="extract-members">Membros</label>
+                </div>
+                <div class="checkbox-item">
+                    <input type="checkbox" id="extract-labels" checked>
+                    <label for="extract-labels">Etiquetas</label>
+                </div>
+                <div class="checkbox-item">
+                    <input type="checkbox" id="extract-actions" checked>
+                    <label for="extract-actions">Atividades</label>
+                </div>
+            </div>
+        </div>
+        
+        <button class="button" onclick="extractData()">🚀 Extrair Dados</button>
+        <button class="button" onclick="clearOutput()" style="background: #6c757d;">🗑️ Limpar</button>
+        
+        <div id="status" class="status"></div>
+        <div id="data-output" class="data-output"></div>
+        
+        <h3>📥 Download</h3>
+        <button class="button" onclick="downloadJSON()" id="download-btn" style="display: none;">💾 Download JSON</button>
+    </div>
+
+    <script>
+        // Variáveis globais
+        let extractedData = null;
+        let boardId = null;
+        
+        // Inicializar Power-Up
+        TrelloPowerUp.initialize({
+            'board-buttons': function(t, options) {
+                return [{
+                    icon: 'https://cdn-icons-png.flaticon.com/512/126/126122.png',
+                    text: 'Extrair Dados',
+                    callback: function(t) {
+                        return t.popup({
+                            title: 'Extrator de Dados Trello',
+                            url: './index.html',
+                            height: 600
+                        });
+                    }
+                }];
+            }
+        });
+
+        // Função principal de extração
+        async function extractData() {
+            const boardUrl = document.getElementById('board-url').value.trim();
+            
+            if (!boardUrl) {
+                showStatus('Por favor, insira a URL do quadro', 'error');
+                return;
+            }
+            
+            // Extrair ID do quadro da URL
+            boardId = extractBoardId(boardUrl);
+            if (!boardId) {
+                showStatus('URL inválida. Use o formato: https://trello.com/b/xxxxxxxx/nome-do-quadro', 'error');
+                return;
+            }
+            
+            showStatus('Extraindo dados...', 'info');
+            
+            try {
+                const data = {};
+                const options = getSelectedOptions();
+                
+                // Extrair dados do quadro
+                if (options.board) {
+                    showStatus('Obtendo informações do quadro...', 'info');
+                    data.board = await fetchBoardData(boardId);
+                }
+                
+                // Extrair listas
+                if (options.lists) {
+                    showStatus('Obtendo listas...', 'info');
+                    data.lists = await fetchLists(boardId);
+                }
+                
+                // Extrair cartões
+                if (options.cards) {
+                    showStatus('Obtendo cartões...', 'info');
+                    data.cards = await fetchCards(boardId);
+                }
+                
+                // Extrair membros
+                if (options.members) {
+                    showStatus('Obtendo membros...', 'info');
+                    data.members = await fetchMembers(boardId);
+                }
+                
+                // Extrair etiquetas
+                if (options.labels) {
+                    showStatus('Obtendo etiquetas...', 'info');
+                    data.labels = await fetchLabels(boardId);
+                }
+                
+                // Extrair atividades
+                if (options.actions) {
+                    showStatus('Obtendo atividades...', 'info');
+                    data.actions = await fetchActions(boardId);
+                }
+                
+                // Adicionar metadados
+                data.metadata = {
+                    extractedAt: new Date().toISOString(),
+                    boardUrl: boardUrl,
+                    boardId: boardId,
+                    extractedBy: 'Trello Data Extractor Power-Up'
+                };
+                
+                extractedData = data;
+                displayData(data);
+                showStatus('✅ Dados extraídos com sucesso!', 'success');
+                document.getElementById('download-btn').style.display = 'inline-block';
+                
+            } catch (error) {
+                console.error('Erro na extração:', error);
+                showStatus('❌ Erro: ' + error.message, 'error');
+            }
+        }
+        
+        // Extrair ID do quadro da URL
+        function extractBoardId(url) {
+            const match = url.match(/\/b\/([a-zA-Z0-9]+)/);
+            return match ? match[1] : null;
+        }
+        
+        // Função para fazer requisições à API pública do Trello
+        async function fetchFromTrello(endpoint) {
+            const url = `https://api.trello.com/1/${endpoint}`;
+            
+            try {
+                const response = await fetch(url);
+                
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        throw new Error('Quadro privado ou credenciais inválidas');
+                    } else if (response.status === 404) {
+                        throw new Error('Quadro não encontrado');
+                    } else {
+                        throw new Error(`Erro HTTP ${response.status}: ${response.statusText}`);
+                    }
+                }
+                
+                return await response.json();
+            } catch (error) {
+                if (error.name === 'TypeError' && error.message.includes('fetch')) {
+                    throw new Error('Erro de conexão. Verifique sua internet.');
+                }
+                throw error;
+            }
+        }
+        
+        // Funções de extração específicas
+        async function fetchBoardData(boardId) {
+            return await fetchFromTrello(`boards/${boardId}?fields=all`);
+        }
+        
+        async function fetchLists(boardId) {
+            return await fetchFromTrello(`boards/${boardId}/lists?fields=all`);
+        }
+        
+        async function fetchCards(boardId) {
+            return await fetchFromTrello(`boards/${boardId}/cards?fields=all&attachments=true&checklists=all`);
+        }
+        
+        async function fetchMembers(boardId) {
+            return await fetchFromTrello(`boards/${boardId}/members?fields=all`);
+        }
+        
+        async function fetchLabels(boardId) {
+            return await fetchFromTrello(`boards/${boardId}/labels?fields=all`);
+        }
+        
+        async function fetchActions(boardId) {
+            return await fetchFromTrello(`boards/${boardId}/actions?limit=1000`);
+        }
+        
+        // Obter opções selecionadas
+        function getSelectedOptions() {
+            return {
+                board: document.getElementById('extract-board').checked,
+                lists: document.getElementById('extract-lists').checked,
+                cards: document.getElementById('extract-cards').checked,
+                members: document.getElementById('extract-members').checked,
+                labels: document.getElementById('extract-labels').checked,
+                actions: document.getElementById('extract-actions').checked
+            };
+        }
+        
+        // Exibir dados extraídos
+        function displayData(data) {
+            const output = document.getElementById('data-output');
+            output.textContent = JSON.stringify(data, null, 2);
+            output.style.display = 'block';
+        }
+        
+        // Limpar saída
+        function clearOutput() {
+            document.getElementById('data-output').style.display = 'none';
+            document.getElementById('download-btn').style.display = 'none';
+            extractedData = null;
+            showStatus('', '');
+        }
+        
+        // Download JSON
+        function downloadJSON() {
+            if (!extractedData) {
+                showStatus('Nenhum dado para download', 'error');
+                return;
+            }
+            
+            const boardName = extractedData.board?.name || 'trello_board';
+            const fileName = `${boardName.replace(/[^a-z0-9]/gi, '_')}_${new Date().toISOString().split('T')[0]}.json`;
+            
+            const blob = new Blob([JSON.stringify(extractedData, null, 2)], { 
+                type: 'application/json' 
+            });
+            
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            showStatus('📥 Download iniciado!', 'success');
+        }
+        
+        // Mostrar status
+        function showStatus(message, type) {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = message;
+            statusEl.className = `status ${type}`;
+            statusEl.style.display = message ? 'block' : 'none';
+        }
+        
+        // Exemplo de uso ao carregar a página
+        document.addEventListener('DOMContentLoaded', function() {
+            // Exemplo de URL para testar
+            const exampleUrl = 'https://trello.com/b/dQHqCohZ/trello-platform-changelog';
+            
+            // Adicionar dica
+            const container = document.querySelector('.container');
+            const tip = document.createElement('div');
+            tip.innerHTML = `
+                <div style="background: #e3f2fd; padding: 15px; border-radius: 4px; margin: 15px 0; border-left: 4px solid #2196f3;">
+                    <strong>💡 Dica:</strong> Para testar, use este quadro público de exemplo:<br>
+                    <code style="background: white; padding: 2px 4px; border-radius: 2px; font-size: 12px;">${exampleUrl}</code>
+                    <button onclick="document.getElementById('board-url').value = '${exampleUrl}'" 
+                            style="margin-left: 10px; padding: 4px 8px; border: none; background: #2196f3; color: white; border-radius: 2px; cursor: pointer; font-size: 12px;">
+                        Usar Exemplo
+                    </button>
+                </div>
+            `;
+            container.insertBefore(tip, container.children[2]);
+        });
+    </script>
+</body>
+</html>
